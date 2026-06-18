@@ -95,11 +95,11 @@ Preencha todas as variáveis no `.env`:
 Agora você precisa dizer pra Evolution API onde mandar as mensagens:
 
 ```bash
-curl -X POST "https://SUA-EVOLUTION-URL.onrender.com/webhook/set/arcondicionado-bot" \
-  -H "apikey: SUA_CHAVE" \
+curl -X POST "https://guarucorp.onrender.com/webhook/set/arcondicionado-bot" \
+  -H "apikey: 080523$And20102007" \
   -H "Content-Type: application/json" \
   -d '{
-    "url": "https://SEU-BACKEND.onrender.com/webhook",
+    "url": "http://localhost:3000/webhook",
     "webhook_by_events": false,
     "events": ["MESSAGES_UPSERT"]
   }'
