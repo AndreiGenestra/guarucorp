@@ -34,7 +34,7 @@ async function receberWebhook(req, res) {
     await adicionarMensagem(sessao.id, "user", mensagem);
 
     // Envia pro Claude processar
-    const { mensagem: resposta, dadosColetados } = await processarMensagem(
+    const { mensagem: resposta, dadosColetados } = await gerarResposta(
       sessao.historico,
       mensagem
     );
