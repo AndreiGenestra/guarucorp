@@ -1,5 +1,5 @@
 const { extrairDadosWebhook, enviarMensagem } = require("../services/whatsappService");
-const { processarMensagem } = require("../services/claudeService");
+const { gerarResposta } = require("../services/claudeService");
 const {
   buscarSessao,
   criarSessao,
