@@ -17,15 +17,16 @@ async function enviarMensagem(telefone, mensagem) {
       `${EVOLUTION_URL}/message/sendText/${INSTANCE}`,
       {
         number: telefone,
-        text: mensagem,
+        textMessage: {
+          text: mensagem // ◄ A Evolution API exige essa estrutura encapsulada aqui
+        }
       },
       { headers }
     );
-
     return response.data;
   } catch (error) {
-    console.error("Erro ao enviar mensagem:", error.response?.data || error.message);
-    throw error;
+    // Seu tratamento de erro do axios atual...
+    throw error; // Lembre-se de dar throw para o seu controller capturar no catch!
   }
 }
 
