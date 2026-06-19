@@ -1,5 +1,5 @@
 const { extrairDadosWebhook, enviarMensagem } = require("../services/whatsappService");
-const { gerarResposta } = require("../services/claudeService");
+const { gerarResposta } = require("../services/claudeService"); // Note: Seu arquivo interno usa Gemini
 const {
   buscarSessao,
   criarSessao,
@@ -13,15 +13,21 @@ async function receberWebhook(req, res) {
   // Responde imediatamente pra Evolution API não reenviar
   res.status(200).json({ status: "ok" });
 
+  // 1. LISTENING DA ENTRADA DO WEBHOOK
+  console.log("\n📥 [LISTENING] Nova requisição recebida na rota /webhook");
+
   try {
     const dados = extrairDadosWebhook(req.body);
 
     // Ignora se não conseguiu extrair dados ou se é mensagem do próprio bot
-    if (!dados || dados.fromMe || !dados.mensagem) return;
+    if (!dados || dados.fromMe || !dados.mensagem) {
+      console.log("ℹ️ Evento ignorado (Mensagem enviada pelo próprio bot ou sem texto)");
+      return;
+    }
 
     const { telefone, mensagem } = dados;
 
-    console.log(`📩 Mensagem recebida de ${telefone}: ${mensagem}`);
+    console.log(`📩 Mensagem recebida de ${telefone}: "${mensagem}"`);
 
     // Busca ou cria sessão do cliente
     let sessao = await buscarSessao(telefone);
@@ -33,26 +39,41 @@ async function receberWebhook(req, res) {
     // Adiciona a mensagem do usuário ao histórico
     await adicionarMensagem(sessao.id, "user", mensagem);
 
-    // Envia pro Claude processar
-    const { mensagem: resposta, dadosColetados } = await gerarResposta(
-      sessao.historico,
-      mensagem
-    );
+    // 2. LISTENING DA IA
+    console.log("🤖 Chamando a API da Inteligência Artificial...");
+    
+    // CORREÇÃO: Como o seu arquivo de serviço retorna 'response.text' (string direta), 
+    // pegamos o retorno puro sem tentar desestruturar um objeto que não existe.
+    const respostaIA = await gerarResposta(sessao.historico, mensagem);
+    
+    console.log(`✨ [LISTENING] Resposta gerada pela IA: "${respostaIA}"`);
 
     // Adiciona a resposta do bot ao histórico
-    await adicionarMensagem(sessao.id, "assistant", resposta);
+    await adicionarMensagem(sessao.id, "assistant", respostaIA);
 
-    // Se o Claude coletou dados estruturados, salva no banco
+    // Se futuramente seu modelo coletar dados estruturados, trate aqui. 
+    // Se 'respostaIA' for string pura, 'dadosColetados' temporariamente não existirá.
+    const dadosColetados = respostaIA.dadosColetados || null;
     if (dadosColetados) {
       await processarDadosColetados(sessao, dadosColetados, telefone);
     }
 
-    // Envia a resposta pro WhatsApp do cliente
-    await enviarMensagem(telefone, resposta);
+    // 3. LISTENING DO ENVIO DO WHATSAPP
+    console.log(`🚀 [LISTENING] Enviando para o whatsappService -> Telefone: ${telefone}`);
+    
+    // CORREÇÃO: Passando a variável correta contendo a string gerada pela IA
+    await enviarMensagem(telefone, respostaIA);
 
-    console.log(`✅ Resposta enviada para ${telefone}`);
+    console.log(`✅ Resposta enviada com sucesso para ${telefone}`);
   } catch (error) {
-    console.error("❌ Erro no webhook:", error);
+    console.error("❌ Erro detectado no fluxo principal do webhook:");
+    
+    // Intercepta erros específicos do Axios / Evolution API
+    if (error.response) {
+      console.error("📋 [LISTENING ERRO EVOLUTION API]:", JSON.stringify(error.response.data, null, 2));
+    } else {
+      console.error(error);
+    }
 
     // Tenta enviar mensagem de erro pro cliente
     try {
@@ -63,26 +84,25 @@ async function receberWebhook(req, res) {
           "Desculpe, tive um probleminha técnico. Pode me mandar a mensagem novamente? 🙏"
         );
       }
-    } catch {}
+    } catch (errEnvio) {
+      console.error("Erro ao tentar enviar aviso de erro para o cliente:", errEnvio.message);
+    }
   }
 }
 
-// Salva os dados coletados pelo Claude no banco
+// Salva os dados coletados no banco
 async function processarDadosColetados(sessao, dados, telefone) {
   try {
-    // Salva/atualiza os dados do cliente
     await upsertCliente({
       telefone,
       nome: dados.nome,
     });
 
-    // Atualiza a sessão com os dados coletados
     await atualizarSessao(sessao.id, {
       status: dados.status,
       dados_atendimento: dados,
     });
 
-    // Se chegou na etapa de agendamento, cria o agendamento
     if (
       dados.status === "agendado" &&
       dados.data_agendamento &&
