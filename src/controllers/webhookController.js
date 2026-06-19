@@ -12,8 +12,6 @@ const supabase = require("../../config/database");
 async function receberWebhook(req, res) {
   // Responde imediatamente pra Evolution API não reenviar
   res.status(200).json({ status: "ok" });
-  console.log("\n📦 [LISTENING BRUTO] Veja a estrutura que a Evolution enviou:");
-  console.log(JSON.stringify(req.body, null, 2));
 
   // 1. LISTENING DA ENTRADA DO WEBHOOK
   console.log("\n📥 [LISTENING] Nova requisição recebida na rota /webhook");
@@ -27,16 +25,7 @@ async function receberWebhook(req, res) {
       return;
     }
 
-    let { telefone, mensagem } = dados;
-
-// CORREÇÃO PARA REMOVER O @lid E GARANTIR O FORMATO CORRETO DE ENVIO:
-if (telefone.includes("@lid")) {
-  // Remove o '@lid', pega só os números, e coloca o sufixo padrão do WhatsApp
-  telefone = telefone.split("@")[0] + "@s.whatsapp.net";
-} else if (!telefone.includes("@")) {
-  // Se vier só número puro por algum motivo, garante o sufixo
-  telefone = `${telefone}@s.whatsapp.net`;
-}
+    const { telefone, mensagem } = dados;
 
     console.log(`📩 Mensagem recebida de ${telefone}: "${mensagem}"`);
 
