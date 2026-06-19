@@ -25,7 +25,16 @@ async function receberWebhook(req, res) {
       return;
     }
 
-    const { telefone, mensagem } = dados;
+    let { telefone, mensagem } = dados;
+
+// CORREÇÃO PARA REMOVER O @lid E GARANTIR O FORMATO CORRETO DE ENVIO:
+if (telefone.includes("@lid")) {
+  // Remove o '@lid', pega só os números, e coloca o sufixo padrão do WhatsApp
+  telefone = telefone.split("@")[0] + "@s.whatsapp.net";
+} else if (!telefone.includes("@")) {
+  // Se vier só número puro por algum motivo, garante o sufixo
+  telefone = `${telefone}@s.whatsapp.net`;
+}
 
     console.log(`📩 Mensagem recebida de ${telefone}: "${mensagem}"`);
 
