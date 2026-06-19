@@ -12,6 +12,8 @@ const supabase = require("../../config/database");
 async function receberWebhook(req, res) {
   // Responde imediatamente pra Evolution API não reenviar
   res.status(200).json({ status: "ok" });
+  console.log("\n📦 [LISTENING BRUTO] Veja a estrutura que a Evolution enviou:");
+  console.log(JSON.stringify(req.body, null, 2));
 
   // 1. LISTENING DA ENTRADA DO WEBHOOK
   console.log("\n📥 [LISTENING] Nova requisição recebida na rota /webhook");
