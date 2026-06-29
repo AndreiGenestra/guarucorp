@@ -1,5 +1,5 @@
-const { extrairDadosWebhook, enviarMensagem } = require("../services/whatsappService");
-const { gerarResposta } = require("../services/claudeService"); // Note: Seu arquivo interno usa Gemini
+const { extrairDadosWebhook, enviarMensagem, marcarComoLida } = require("../services/whatsappService");
+const { gerarResposta } = require("../services/claudeService"); // Gemini
 const {
   buscarSessao,
   criarSessao,
@@ -10,33 +10,31 @@ const { criarAgendamento } = require("../services/agendaService");
 const supabase = require("../../config/database");
 
 async function receberWebhook(req, res) {
-  // Responde imediatamente pra Evolution API não reenviar
+  // Responde imediatamente — a Meta exige resposta em até 20s ou reenvia o webhook
   res.status(200).json({ status: "ok" });
 
-  // 1. LISTENING DA ENTRADA DO WEBHOOK
   console.log("\n📥 [LISTENING] Nova requisição recebida na rota /webhook");
 
   try {
     const dados = extrairDadosWebhook(req.body);
 
-    // Ignora se não conseguiu extrair dados ou se é mensagem do próprio bot
+    // Retorna null se for notificação de status (enviado/entregue/lido), não mensagem nova
     if (!dados || dados.fromMe || !dados.mensagem) {
-      console.log("ℹ️ Evento ignorado (Mensagem enviada pelo próprio bot ou sem texto)");
+      console.log("ℹ️ Evento ignorado (sem mensagem de texto, ou notificação de status)");
       return;
     }
 
-    let { telefone, mensagem } = dados;
+    const { telefone, mensagem, messageId, nomeContato } = dados;
 
-// CORREÇÃO PARA REMOVER O @lid E GARANTIR O FORMATO CORRETO DE ENVIO:
-if (telefone.includes("@lid")) {
-  // Remove o '@lid', pega só os números, e coloca o sufixo padrão do WhatsApp
-  telefone = telefone.split("@")[0] + "@s.whatsapp.net";
-} else if (!telefone.includes("@")) {
-  // Se vier só número puro por algum motivo, garante o sufixo
-  telefone = `${telefone}@s.whatsapp.net`;
-}
+    // NOTA: na Meta Cloud API, "telefone" já vem como número de telefone puro
+    // (ex: "5511999999999"), sem @lid e sem qualquer sufixo. Não precisa de
+    // nenhum tratamento extra aqui — o remendo do @lid que existia antes foi
+    // removido porque a causa raiz (conexão não-oficial) não existe mais.
 
-    console.log(`📩 Mensagem recebida de ${telefone}: "${mensagem}"`);
+    console.log(`📩 Mensagem recebida de ${telefone} (${nomeContato || "sem nome"}): "${mensagem}"`);
+
+    // Marca como lida (boa prática, não bloqueia o fluxo se falhar)
+    if (messageId) marcarComoLida(messageId).catch(() => {});
 
     // Busca ou cria sessão do cliente
     let sessao = await buscarSessao(telefone);
@@ -48,38 +46,29 @@ if (telefone.includes("@lid")) {
     // Adiciona a mensagem do usuário ao histórico
     await adicionarMensagem(sessao.id, "user", mensagem);
 
-    // 2. LISTENING DA IA
+    // Chama a IA (Gemini) passando o histórico completo + mensagem nova
     console.log("🤖 Chamando a API da Inteligência Artificial...");
-    
-    // CORREÇÃO: Como o seu arquivo de serviço retorna 'response.text' (string direta), 
-    // pegamos o retorno puro sem tentar desestruturar um objeto que não existe.
-    const respostaIA = await gerarResposta(sessao.historico, mensagem);
-    
-    console.log(`✨ [LISTENING] Resposta gerada pela IA: "${respostaIA}"`);
+    const { mensagem: resposta, dadosColetados } = await gerarResposta(sessao.historico, mensagem);
+    console.log(`✨ [LISTENING] Resposta gerada pela IA: "${resposta}"`);
 
     // Adiciona a resposta do bot ao histórico
-    await adicionarMensagem(sessao.id, "assistant", respostaIA);
+    await adicionarMensagem(sessao.id, "assistant", resposta);
 
-    // Se futuramente seu modelo coletar dados estruturados, trate aqui. 
-    // Se 'respostaIA' for string pura, 'dadosColetados' temporariamente não existirá.
-    const dadosColetados = respostaIA.dadosColetados || null;
+    // Se a IA coletou dados estruturados (nome, problema, agendamento, etc.), salva no banco
     if (dadosColetados) {
-      await processarDadosColetados(sessao, dadosColetados, telefone);
+      await processarDadosColetados(sessao, dadosColetados, telefone, nomeContato);
     }
 
-    // 3. LISTENING DO ENVIO DO WHATSAPP
+    // Envia a resposta pro WhatsApp do cliente
     console.log(`🚀 [LISTENING] Enviando para o whatsappService -> Telefone: ${telefone}`);
-    
-    // CORREÇÃO: Passando a variável correta contendo a string gerada pela IA
-    await enviarMensagem(telefone, respostaIA);
+    await enviarMensagem(telefone, resposta);
 
     console.log(`✅ Resposta enviada com sucesso para ${telefone}`);
   } catch (error) {
     console.error("❌ Erro detectado no fluxo principal do webhook:");
-    
-    // Intercepta erros específicos do Axios / Evolution API
+
     if (error.response) {
-      console.error("📋 [LISTENING ERRO EVOLUTION API]:", JSON.stringify(error.response.data, null, 2));
+      console.error("📋 [LISTENING ERRO META API]:", JSON.stringify(error.response.data, null, 2));
     } else {
       console.error(error);
     }
@@ -100,11 +89,12 @@ if (telefone.includes("@lid")) {
 }
 
 // Salva os dados coletados no banco
-async function processarDadosColetados(sessao, dados, telefone) {
+async function processarDadosColetados(sessao, dados, telefone, nomeContato) {
   try {
+    // Usa o nome do WhatsApp como fallback se a IA ainda não coletou o nome
     await upsertCliente({
       telefone,
-      nome: dados.nome,
+      nome: dados.nome || nomeContato,
     });
 
     await atualizarSessao(sessao.id, {
@@ -119,7 +109,7 @@ async function processarDadosColetados(sessao, dados, telefone) {
     ) {
       await criarAgendamento({
         telefone,
-        nome: dados.nome,
+        nome: dados.nome || nomeContato,
         problema: dados.problema,
         equipamento: dados.equipamento,
         tipo_consulta: dados.tipo_consulta,
